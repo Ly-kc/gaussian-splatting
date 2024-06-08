@@ -9,7 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import os
+import os, time
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
@@ -48,6 +48,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+    last_100iter_timestamp = time.perf_counter()
+    start_timestamp = time.perf_counter()
     for iteration in range(first_iter, opt.iterations + 1):        
         if network_gui.conn == None:
             network_gui.try_connect()
@@ -112,8 +114,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Densification
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                gaussians.add_densification_stats_and_max_radii2D(radii, viewspace_point_tensor, visibility_filter)
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
@@ -130,6 +131,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+        
+        if pipe.timing and iteration%100 == 0 and iteration != 0:
+            cur_timestamp = time.perf_counter()
+            print(f"Iteration {iteration-100:4d} ~ {iteration:4d}: {(cur_timestamp - last_100iter_timestamp)*1000:4.0f} ms, {gaussians.get_xyz.shape[0]} gaussians")
+            last_100iter_timestamp = cur_timestamp
+    
+    end_timestamp = time.perf_counter()
+    if pipe.timing:
+        print(f"Total time: {end_timestamp - start_timestamp} seconds")
 
 def prepare_output_and_logger(args):    
     if not args.model_path:
@@ -206,7 +216,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     args = parser.parse_args(sys.argv[1:])
-    args.save_iterations.append(args.iterations)
+    if -1 not in args.save_iterations:
+        args.save_iterations.append(args.iterations)
     
     print("Optimizing " + args.model_path)
 
