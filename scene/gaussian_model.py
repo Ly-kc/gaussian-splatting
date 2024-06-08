@@ -42,8 +42,14 @@ class GaussianModel:
 
 
     def __init__(self, sh_degree : int):
+        # Currently active SH (Spherical Harmonics) degree
+        # After every 1000 iterations, we increase the SH degree by 1 until
+        # it reaches the maximum SH degree
+        # TODO (intlsy) Maybe we need to change this parameter (1000) to a lower value
+        # since we have a better initialization
         self.active_sh_degree = 0
-        self.max_sh_degree = sh_degree  
+        # Maximum SH degree, configured by the user, the default value is 3
+        self.max_sh_degree = sh_degree
         self._xyz = torch.empty(0)
         self._features_dc = torch.empty(0)
         self._features_rest = torch.empty(0)
@@ -402,6 +408,16 @@ class GaussianModel:
 
         torch.cuda.empty_cache()
 
-    def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
-        self.denom[update_filter] += 1
+    def add_densification_stats_and_max_radii2D(self, radii, viewspace_point_tensor, update_filter):
+        from kernel.add_densification_stats_and_max_radii2D import add_densification_stats_and_max_radii2D_kernel
+        add_densification_stats_and_max_radii2D_kernel(
+            update_filter,
+            radii,
+            self.max_radii2D,
+            viewspace_point_tensor.grad,
+            self.xyz_gradient_accum,
+            self.denom
+        )
+        # self.max_radii2D[update_filter] = torch.max(self.max_radii2D, radii)[update_filter]
+        # self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+        # self.denom[update_filter] += 1
