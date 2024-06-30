@@ -11,6 +11,7 @@
 
 import os
 import torch
+import cv2
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
@@ -48,9 +49,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+    os.makedirs(os.path.join(scene.model_path, "visualize"), exist_ok=True)
+    save_num = 0
     for iteration in range(first_iter, opt.iterations + 1):        
         if network_gui.conn == None:
             network_gui.try_connect()
+        # print(network_gui.conn)
         while network_gui.conn != None:
             try:
                 net_image_bytes = None
@@ -85,15 +89,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-
+    
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
+        
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
 
         iter_end.record()
-
+        
         with torch.no_grad():
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
@@ -130,7 +135,30 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
-
+            # Save visualization
+            if(iteration % 500 == 0):
+                os.makedirs(os.path.join(scene.model_path, "visualize", f"{iteration}"), exist_ok=True)
+                for i in range(len(scene.getTrainCameras())):
+                    viewpoint_cam = scene.getTrainCameras()[i]
+                    bg = torch.rand((3), device="cuda") if opt.random_background else background
+                    render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+                    image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+                    gt_image = viewpoint_cam.original_image.cuda()
+                    cv2.imwrite(os.path.join(scene.model_path, "visualize", f"{iteration}", f"{viewpoint_cam.image_name}.png"), 
+                            (image[[2,1,0]].permute(1,2,0).cpu().detach().numpy() * 255).astype('uint8'))  
+                    cv2.imwrite(os.path.join(scene.model_path, "visualize", f"{iteration}", f"gt_{viewpoint_cam.image_name}.png"), 
+                            (gt_image[[2,1,0]].permute(1,2,0).cpu().detach().numpy() * 255).astype('uint8'))
+                for i in range(len(scene.getTestCameras())):
+                    viewpoint_cam = scene.getTestCameras()[i]
+                    bg = torch.rand((3), device="cuda") if opt.random_background else background
+                    render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+                    image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+                    gt_image = viewpoint_cam.original_image.cuda()
+                    cv2.imwrite(os.path.join(scene.model_path, "visualize", f"{iteration}", f"test_{viewpoint_cam.image_name}.png"), 
+                            (image[[2,1,0]].permute(1,2,0).cpu().detach().numpy() * 255).astype('uint8'))  
+                    cv2.imwrite(os.path.join(scene.model_path, "visualize", f"{iteration}", f"test_gt_{viewpoint_cam.image_name}.png"), 
+                            (gt_image[[2,1,0]].permute(1,2,0).cpu().detach().numpy() * 255).astype('uint8'))
+                    
 def prepare_output_and_logger(args):    
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):

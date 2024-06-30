@@ -79,7 +79,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         width = intr.width
 
         uid = intr.id
-        R = np.transpose(qvec2rotmat(extr.qvec))
+        R = np.transpose(qvec2rotmat(extr.qvec)) 
         T = np.array(extr.tvec)
 
         if intr.model=="SIMPLE_PINHOLE":
@@ -144,6 +144,9 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     reading_dir = "images" if images == None else images
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+    
+    # cam_infos = cam_infos[::20]
+    # llffhold = 6
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
@@ -254,7 +257,68 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
                            ply_path=ply_path)
     return scene_info
 
+
+def readDusterCameras(path, images):
+    cam_infos = []
+
+    with open (os.path.join(path, "cameras.txt"), 'r') as f:
+        cam_data = json.load(f)
+    for image_id, data in cam_data.items():
+        uid = image_id
+        R = np.transpose(qvec2rotmat(data["qvec"])) 
+        T = np.array(data["tvec"])
+        width = data["width"]
+        height = data["height"]
+        focal = data["focal_length"]
+        FovY = focal2fov(focal, height)
+        FovX = focal2fov(focal, width)
+        image_name = data["name"]
+        image_path = os.path.join(path, images, image_name)
+        image = Image.open(image_path)
+        
+        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                              image_path=image_path, image_name=image_name, width=width, height=height)
+        cam_infos.append(cam_info)
+    return cam_infos
+
+def readDusterInfo(path:str, images:str, eval:bool, llffhold=6):
+    """
+    path: path to the duster folder, similar to colmap
+    images: relative path to the images folder
+    """
+    reading_dir = "images" if images == None else images
+    cam_infos_unsorted = readDusterCameras(path, reading_dir)
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+    
+    ply_path = os.path.join(path, "dense.ply")
+    plydata = PlyData.read(ply_path)
+    vertices = plydata['vertex']
+    positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
+    colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
+    pcd = BasicPointCloud(points=positions, colors=colors, normals=None)
+    
+    scene_info = SceneInfo(point_cloud=pcd,
+                        train_cameras=train_cam_infos,
+                        test_cameras=test_cam_infos,
+                        nerf_normalization=nerf_normalization,
+                        ply_path=ply_path)
+    # print(scene_info)
+    return scene_info
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "Duster": readDusterInfo
 }
+
+
+    

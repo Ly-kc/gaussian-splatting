@@ -39,12 +39,15 @@ class Scene:
 
         self.train_cameras = {}
         self.test_cameras = {}
-
+        print(os.path.join(args.source_path, "dense.ply"))
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
+        elif os.path.exists(os.path.join(args.source_path, "dense.ply")):
+            print("Found dense.ply file, assuming duster data set!")
+            scene_info = sceneLoadTypeCallbacks["Duster"](args.source_path, args.images, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -91,3 +94,5 @@ class Scene:
 
     def getTestCameras(self, scale=1.0):
         return self.test_cameras[scale]
+    
+    
